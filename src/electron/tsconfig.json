@@ -2,9 +2,11 @@
     "compilerOptions": {
         "strict": true,
         "target": "ESNext",
-        "module": "NodeNext",
+        "module": "CommonJS",
+        "moduleResolution": "Node",
         "outDir": "../../dist-electron",
         "skipLibCheck": true,
+        "esModuleInterop": true,
         // add global types
         "types": [
             "../../types"

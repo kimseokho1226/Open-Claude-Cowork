@@ -42,23 +42,21 @@ export async function runClaude(options: RunnerOptions): Promise<RunnerHandle> {
   // Start the query in the background
   (async () => {
     try {
-      // 获取当前配置
+      // 获取当前配置 (可选 - Claude Max 订阅不需要)
       const config = getCurrentApiConfig();
-      
-      if (!config) {
-        onEvent({
-          type: "session.status",
-          payload: { sessionId: session.id, status: "error", title: session.title, cwd: session.cwd, error: "API configuration not found. Please configure API settings." }
-        });
-        return;
+
+      // 构建环境变量
+      let mergedEnv = getEnhancedEnv();
+
+      if (config) {
+        // 使用自定义 API 配置
+        const env = buildEnvForConfig(config);
+        mergedEnv = {
+          ...mergedEnv,
+          ...env
+        };
       }
-      
-      // 使用 Anthropic SDK
-      const env = buildEnvForConfig(config);
-      const mergedEnv = {
-        ...getEnhancedEnv(),
-        ...env
-      };
+      // 如果没有配置，SDK 将使用 Claude Max 订阅（已登录的 Claude Code）
       
       const q = query({
         prompt,

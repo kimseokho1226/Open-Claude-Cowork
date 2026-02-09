@@ -10,6 +10,9 @@ import { getCurrentApiConfig } from "./libs/claude-settings.js";
 import type { ClientEvent } from "./types.js";
 import "./libs/claude-settings.js";
 
+// Memory optimization
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=512');
+
 let cleanupComplete = false;
 let mainWindow: BrowserWindow | null = null;
 
