@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { PermissionResult } from "@anthropic-ai/claude-agent-sdk";
 import type { PermissionRequest } from "../store/useAppStore";
 
@@ -23,6 +23,7 @@ export function DecisionPanel({
   const questions = input?.questions ?? [];
   const [selectedOptions, setSelectedOptions] = useState<Record<number, string[]>>({});
   const [otherInputs, setOtherInputs] = useState<Record<number, string>>({});
+  const isComposingRef = useRef(false);
 
   useEffect(() => {
     setSelectedOptions({});
@@ -114,6 +115,11 @@ export function DecisionPanel({
                 placeholder="Type your answer..."
                 value={otherInputs[qIndex] ?? ""}
                 onChange={(e) => setOtherInputs((prev) => ({ ...prev, [qIndex]: e.target.value }))}
+                onCompositionStart={() => { isComposingRef.current = true; }}
+                onCompositionEnd={(e) => {
+                  isComposingRef.current = false;
+                  setOtherInputs((prev) => ({ ...prev, [qIndex]: e.currentTarget.value }));
+                }}
               />
             </div>
             {q.multiSelect && <div className="mt-2 text-xs text-muted">Multiple selections allowed.</div>}

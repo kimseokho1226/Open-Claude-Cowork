@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 interface StartSessionModalProps {
   cwd: string;
@@ -20,6 +20,8 @@ export function StartSessionModal({
   onClose
 }: StartSessionModalProps) {
   const [recentCwds, setRecentCwds] = useState<string[]>([]);
+  const [localPrompt, setLocalPrompt] = useState(prompt);
+  const isComposingRef = useRef(false);
 
   useEffect(() => {
     window.electron.getRecentCwds().then(setRecentCwds).catch(console.error);
@@ -86,8 +88,20 @@ export function StartSessionModal({
               rows={4}
               className="rounded-xl border border-ink-900/10 bg-surface-secondary p-3 text-sm text-ink-800 placeholder:text-muted-light focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/20 transition-colors resize-none"
               placeholder="Describe the task you want agent to handle..."
-              value={prompt}
-              onChange={(e) => onPromptChange(e.target.value)}
+              value={localPrompt}
+              onChange={(e) => {
+                setLocalPrompt(e.target.value);
+                if (!isComposingRef.current) {
+                  onPromptChange(e.target.value);
+                }
+              }}
+              onCompositionStart={() => { isComposingRef.current = true; }}
+              onCompositionEnd={(e) => {
+                isComposingRef.current = false;
+                const value = e.currentTarget.value;
+                setLocalPrompt(value);
+                onPromptChange(value);
+              }}
             />
           </label>
           <button

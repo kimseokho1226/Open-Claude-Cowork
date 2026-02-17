@@ -134,7 +134,8 @@ export class SessionStore {
         `select data from messages where session_id = ? order by created_at asc`
       )
       .all(id) as Array<Record<string, unknown>>)
-      .map((row) => JSON.parse(String(row.data)) as StreamMessage);
+      .map((row) => JSON.parse(String(row.data)) as StreamMessage)
+      .filter((msg) => (msg as any).type !== "stream_event");
 
     return {
       session: {
@@ -239,6 +240,9 @@ export class SessionStore {
       )`
     );
     this.db.exec(`create index if not exists messages_session_id on messages(session_id)`);
+
+    // One-time migration: purge stream_event rows that were stored before the fix
+    this.db.exec(`delete from messages where json_extract(data, '$.type') = 'stream_event'`);
   }
 
   private loadSessions(): void {

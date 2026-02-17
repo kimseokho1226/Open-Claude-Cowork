@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(powershell.exe:*)",
+      "Bash(npm run build:*)",
+      "Bash(npm run transpile:electron:*)"
+    ]
+  }
+}

@@ -16,7 +16,14 @@ type ToolResultContent = SDKUserMessage["message"]["content"][number];
 type ToolStatus = "pending" | "success" | "error";
 const toolStatusMap = new Map<string, ToolStatus>();
 const toolStatusListeners = new Set<() => void>();
+const MAX_TOOL_STATUS_ENTRIES = 500;
 const MAX_VISIBLE_LINES = 3;
+
+/** Clear all tool status tracking (call on session change) */
+export function clearToolStatusMap() {
+  toolStatusMap.clear();
+  toolStatusListeners.forEach((listener) => listener());
+}
 
 type AskUserQuestionInput = {
   questions?: Array<{
@@ -38,6 +45,11 @@ const getAskUserQuestionSignature = (input?: AskUserQuestionInput | null) => {
 const setToolStatus = (toolUseId: string | undefined, status: ToolStatus) => {
   if (!toolUseId) return;
   toolStatusMap.set(toolUseId, status);
+  // Evict oldest entries when map exceeds limit to prevent unbounded growth
+  if (toolStatusMap.size > MAX_TOOL_STATUS_ENTRIES) {
+    const keysToDelete = Array.from(toolStatusMap.keys()).slice(0, toolStatusMap.size - MAX_TOOL_STATUS_ENTRIES);
+    for (const key of keysToDelete) toolStatusMap.delete(key);
+  }
   toolStatusListeners.forEach((listener) => listener());
 };
 
@@ -167,9 +179,36 @@ const AssistantBlockCard = ({ title, text, showIndicator = false }: { title: str
   </div>
 );
 
+const getToolIcon = (toolName: string) => {
+  switch (toolName) {
+    case "Bash":
+      return <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 17l6-6-6-6M12 19h8" /></svg>;
+    case "Read":
+      return <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" /></svg>;
+    case "Write":
+      return <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z" /></svg>;
+    case "Edit":
+      return <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>;
+    case "Glob":
+    case "Grep":
+      return <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" /></svg>;
+    case "Task":
+      return <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2"><path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2" /><rect x="8" y="2" width="8" height="4" rx="1" /></svg>;
+    case "WebFetch":
+    case "WebSearch":
+      return <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><path d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" /></svg>;
+    case "TodoWrite":
+      return <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" /></svg>;
+    default:
+      return <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z" /></svg>;
+  }
+};
+
 const ToolUseCard = ({ messageContent, showIndicator = false }: { messageContent: MessageContent; showIndicator?: boolean }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+
   if (messageContent.type !== "tool_use") return null;
-  
+
   const toolStatus = useToolStatus(messageContent.id);
   const statusVariant = toolStatus === "error" ? "error" : "success";
   const isPending = !toolStatus || toolStatus === "pending";
@@ -179,27 +218,72 @@ const ToolUseCard = ({ messageContent, showIndicator = false }: { messageContent
     if (messageContent?.id && !toolStatusMap.has(messageContent.id)) setToolStatus(messageContent.id, "pending");
   }, [messageContent?.id]);
 
-  const getToolInfo = (): string | null => {
-    const input = messageContent.input as Record<string, any>;
+  const input = messageContent.input as Record<string, any>;
+
+  const getToolInfo = (): { primary: string | null; secondary?: string | null } => {
     switch (messageContent.name) {
-      case "Bash": return input?.command || null;
-      case "Read": case "Write": case "Edit": return input?.file_path || null;
-      case "Glob": case "Grep": return input?.pattern || null;
-      case "Task": return input?.description || null;
-      case "WebFetch": return input?.url || null;
-      default: return null;
+      case "Bash":
+        return { primary: input?.command || null, secondary: input?.description || null };
+      case "Read":
+      case "Write":
+        return { primary: input?.file_path || null };
+      case "Edit":
+        return { primary: input?.file_path || null, secondary: input?.old_string ? `"${input.old_string.slice(0, 50)}${input.old_string.length > 50 ? '...' : ''}"` : null };
+      case "Glob":
+        return { primary: input?.pattern || null, secondary: input?.path || null };
+      case "Grep":
+        return { primary: input?.pattern || null, secondary: input?.path || null };
+      case "Task":
+        return { primary: input?.description || null, secondary: input?.subagent_type || null };
+      case "WebFetch":
+        return { primary: input?.url || null, secondary: input?.prompt ? input.prompt.slice(0, 50) : null };
+      case "WebSearch":
+        return { primary: input?.query || null };
+      case "TodoWrite":
+        const todos = input?.todos as Array<{ content: string; status: string }> | undefined;
+        if (todos?.length) {
+          const inProgress = todos.filter(t => t.status === "in_progress").map(t => t.content);
+          return { primary: inProgress.length > 0 ? inProgress[0] : `${todos.length} tasks` };
+        }
+        return { primary: null };
+      default:
+        return { primary: JSON.stringify(input).slice(0, 100) };
     }
   };
 
+  const toolInfo = getToolInfo();
+  const hasDetails = input && Object.keys(input).length > 0;
+
   return (
-    <div className="flex flex-col gap-2 rounded-[1rem] bg-surface-tertiary px-3 py-2 mt-4 overflow-hidden">
-      <div className="flex flex-row items-center gap-2 min-w-0">
+    <div className="flex flex-col rounded-[1rem] bg-surface-tertiary mt-4 overflow-hidden">
+      <button
+        className="flex flex-row items-center gap-2 px-3 py-2 min-w-0 w-full text-left hover:bg-ink-900/5 transition-colors"
+        onClick={() => hasDetails && setIsExpanded(!isExpanded)}
+      >
         <StatusDot variant={statusVariant} isActive={isPending && showIndicator} isVisible={shouldShowDot} />
         <div className="flex flex-row items-center gap-2 tool-use-item min-w-0 flex-1">
-          <span className="inline-flex items-center rounded-md text-accent py-0.5 text-sm font-medium shrink-0">{messageContent.name}</span>
-          <span className="text-sm text-muted truncate">{getToolInfo()}</span>
+          <span className="inline-flex items-center gap-1.5 rounded-md text-accent py-0.5 text-sm font-medium shrink-0">
+            {getToolIcon(messageContent.name)}
+            {messageContent.name}
+          </span>
+          <span className="text-sm text-muted truncate">{toolInfo.primary}</span>
+          {toolInfo.secondary && (
+            <span className="text-xs text-muted-light truncate hidden sm:inline">· {toolInfo.secondary}</span>
+          )}
         </div>
-      </div>
+        {hasDetails && (
+          <svg viewBox="0 0 24 24" className={`h-4 w-4 text-muted shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        )}
+      </button>
+      {isExpanded && hasDetails && (
+        <div className="px-3 pb-2 border-t border-ink-900/5">
+          <pre className="mt-2 text-xs text-ink-600 whitespace-pre-wrap break-words font-mono bg-surface-secondary rounded-lg p-2 max-h-48 overflow-auto">
+            {JSON.stringify(input, null, 2)}
+          </pre>
+        </div>
+      )}
     </div>
   );
 };

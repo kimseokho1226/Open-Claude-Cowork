@@ -8,7 +8,9 @@ import { Sidebar } from "./components/Sidebar";
 import { StartSessionModal } from "./components/StartSessionModal";
 import { SettingsModal } from "./components/SettingsModal";
 import { PromptInput, usePromptActions } from "./components/PromptInput";
-import { MessageCard } from "./components/EventCard";
+import { MessageCard, clearToolStatusMap } from "./components/EventCard";
+import { StatusBar } from "./components/StatusBar";
+import { TodoProgress } from "./components/TodoProgress";
 import MDContent from "./render/markdown";
 
 const SCROLL_THRESHOLD = 50;
@@ -18,6 +20,7 @@ function App() {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const topSentinelRef = useRef<HTMLDivElement>(null);
   const partialMessageRef = useRef("");
+  const partialTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [partialMessage, setPartialMessage] = useState("");
   const [showPartialMessage, setShowPartialMessage] = useState(false);
   const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
@@ -80,9 +83,11 @@ function App() {
 
     if (message.event.type === "content_block_stop") {
       setShowPartialMessage(false);
-      setTimeout(() => {
+      if (partialTimerRef.current) clearTimeout(partialTimerRef.current);
+      partialTimerRef.current = setTimeout(() => {
         partialMessageRef.current = "";
         setPartialMessage(partialMessageRef.current);
+        partialTimerRef.current = null;
       }, 500);
     }
   }, [shouldAutoScroll]);
@@ -110,20 +115,13 @@ function App() {
     totalMessages,
   } = useMessageWindow(messages, permissionRequests, activeSessionId);
 
-  // 启动时检查 API 配置
+  // API config check on startup - no longer auto-opens settings modal
+  // Claude Max subscription works without API config
   useEffect(() => {
     if (!apiConfigChecked) {
-      window.electron.checkApiConfig().then((result) => {
-        setApiConfigChecked(true);
-        if (!result.hasConfig) {
-          setShowSettingsModal(true);
-        }
-      }).catch((err) => {
-        console.error("Failed to check API config:", err);
-        setApiConfigChecked(true);
-      });
+      setApiConfigChecked(true);
     }
-  }, [apiConfigChecked, setApiConfigChecked, setShowSettingsModal]);
+  }, [apiConfigChecked, setApiConfigChecked]);
 
   useEffect(() => {
     if (connected) sendEvent({ type: "session.list" });
@@ -200,9 +198,19 @@ function App() {
     setShouldAutoScroll(true);
     setHasNewMessages(false);
     prevMessagesLengthRef.current = 0;
-    setTimeout(() => {
+    clearToolStatusMap();
+    // Clear any pending partial message timer
+    if (partialTimerRef.current) {
+      clearTimeout(partialTimerRef.current);
+      partialTimerRef.current = null;
+    }
+    partialMessageRef.current = "";
+    setPartialMessage("");
+    setShowPartialMessage(false);
+    const scrollTimer = setTimeout(() => {
       messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
     }, 100);
+    return () => clearTimeout(scrollTimer);
   }, [activeSessionId]);
 
   useEffect(() => {
@@ -251,11 +259,28 @@ function App() {
       />
 
       <main className="flex flex-1 flex-col ml-[280px] bg-surface-cream">
+        {/* Title Bar */}
         <div
-          className="flex items-center justify-center h-12 border-b border-ink-900/10 bg-surface-cream select-none"
+          className="flex items-center justify-between h-12 border-b border-ink-900/10 bg-surface-cream select-none px-4"
           style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
         >
-          <span className="text-sm font-medium text-ink-700">{activeSession?.title || "Agent Cowork"}</span>
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            {isRunning && (
+              <span className="relative flex h-2 w-2 shrink-0">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-info opacity-75" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-info" />
+              </span>
+            )}
+            <span className="text-sm font-medium text-ink-700 truncate">{activeSession?.title || "Agent Cowork"}</span>
+          </div>
+          {activeSession?.cwd && (
+            <div className="flex items-center gap-1.5 text-xs text-muted shrink-0" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+              <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+              </svg>
+              <span className="max-w-[200px] truncate">{activeSession.cwd}</span>
+            </div>
+          )}
         </div>
 
         <div
@@ -287,6 +312,9 @@ function App() {
                 </div>
               </div>
             )}
+
+            {/* Todo Progress Indicator */}
+            {messages.length > 0 && <TodoProgress messages={messages} />}
 
             {visibleMessages.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-20 text-center">
@@ -335,6 +363,13 @@ function App() {
         </div>
 
         <PromptInput sendEvent={sendEvent} onSendMessage={handleSendMessage} disabled={visibleMessages.length === 0} />
+
+        {/* Status Bar */}
+        <StatusBar
+          messages={messages}
+          sessionStatus={activeSession?.status || "idle"}
+          isConnected={connected}
+        />
 
         {hasNewMessages && !shouldAutoScroll && (
           <button

@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import type { ServerEvent, SessionStatus, StreamMessage } from "../types";
 
+export type ThemeMode = 'light' | 'dark' | 'system';
+
 export type PermissionRequest = {
   toolUseId: string;
   toolName: string;
@@ -32,6 +34,7 @@ interface AppState {
   showSettingsModal: boolean;
   historyRequested: Set<string>;
   apiConfigChecked: boolean;
+  theme: ThemeMode;
 
   setPrompt: (prompt: string) => void;
   setCwd: (cwd: string) => void;
@@ -41,14 +44,51 @@ interface AppState {
   setShowSettingsModal: (show: boolean) => void;
   setActiveSessionId: (id: string | null) => void;
   setApiConfigChecked: (checked: boolean) => void;
+  setTheme: (theme: ThemeMode) => void;
   markHistoryRequested: (sessionId: string) => void;
   resolvePermissionRequest: (sessionId: string, toolUseId: string) => void;
   handleServerEvent: (event: ServerEvent) => void;
 }
 
+// Apply theme to document
+function applyTheme(theme: ThemeMode) {
+  const root = document.documentElement;
+  const isDark = theme === 'dark' ||
+    (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+
+  if (isDark) {
+    root.classList.add('dark');
+  } else {
+    root.classList.remove('dark');
+  }
+}
+
 function createSession(id: string): SessionView {
   return { id, title: "", status: "idle", messages: [], permissionRequests: [], hydrated: false };
 }
+
+// Get initial theme from localStorage or default to system
+function getInitialTheme(): ThemeMode {
+  try {
+    const stored = localStorage.getItem('agent-cowork-theme');
+    if (stored === 'light' || stored === 'dark' || stored === 'system') {
+      return stored;
+    }
+  } catch {}
+  return 'system';
+}
+
+// Initialize theme on load
+const initialTheme = getInitialTheme();
+applyTheme(initialTheme);
+
+// Listen for system theme changes
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+  const currentTheme = useAppStore.getState().theme;
+  if (currentTheme === 'system') {
+    applyTheme('system');
+  }
+});
 
 export const useAppStore = create<AppState>((set, get) => ({
   sessions: {},
@@ -62,6 +102,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   showSettingsModal: false,
   historyRequested: new Set(),
   apiConfigChecked: false,
+  theme: initialTheme,
 
   setPrompt: (prompt) => set({ prompt }),
   setCwd: (cwd) => set({ cwd }),
@@ -71,6 +112,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   setShowSettingsModal: (showSettingsModal) => set({ showSettingsModal }),
   setActiveSessionId: (id) => set({ activeSessionId: id }),
   setApiConfigChecked: (apiConfigChecked) => set({ apiConfigChecked }),
+  setTheme: (theme) => {
+    localStorage.setItem('agent-cowork-theme', theme);
+    applyTheme(theme);
+    set({ theme });
+  },
 
   markHistoryRequested: (sessionId) => {
     set((state) => {
@@ -212,12 +258,17 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       case "stream.message": {
         const { sessionId, message } = event.payload;
+        // Skip stream_event messages (partial streaming deltas) - they are handled
+        // by App.tsx handlePartialMessages and don't need to be stored
+        if ((message as any).type === "stream_event") break;
         set((state) => {
           const existing = state.sessions[sessionId] ?? createSession(sessionId);
+          // Use concat to create new reference without spreading entire array
+          const nextMessages = existing.messages.concat(message);
           return {
             sessions: {
               ...state.sessions,
-              [sessionId]: { ...existing, messages: [...existing.messages, message] }
+              [sessionId]: { ...existing, messages: nextMessages }
             }
           };
         });
@@ -233,7 +284,7 @@ export const useAppStore = create<AppState>((set, get) => ({
               ...state.sessions,
               [sessionId]: {
                 ...existing,
-                messages: [...existing.messages, { type: "user_prompt", prompt }]
+                messages: existing.messages.concat({ type: "user_prompt" as const, prompt })
               }
             }
           };

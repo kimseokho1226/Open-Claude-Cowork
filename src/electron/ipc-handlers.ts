@@ -46,7 +46,12 @@ function emit(event: ServerEvent) {
     sessions.updateSession(event.payload.sessionId, { status: event.payload.status });
   }
   if (event.type === "stream.message") {
-    sessions.recordMessage(event.payload.sessionId, event.payload.message);
+    // Skip persisting stream_event (partial streaming deltas) - they are only
+    // needed for real-time display and cause massive DB bloat over time
+    const msg = event.payload.message as any;
+    if (msg.type !== "stream_event") {
+      sessions.recordMessage(event.payload.sessionId, event.payload.message);
+    }
   }
   if (event.type === "stream.user_prompt") {
     sessions.recordMessage(event.payload.sessionId, {

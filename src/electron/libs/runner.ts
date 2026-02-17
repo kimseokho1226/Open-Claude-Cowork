@@ -2,7 +2,7 @@ import { query, type SDKMessage, type PermissionResult } from "@anthropic-ai/cla
 import type { ServerEvent } from "../types.js";
 import type { Session } from "./session-store.js";
 
-import { getCurrentApiConfig, buildEnvForConfig, getClaudeCodePath} from "./claude-settings.js";
+import { getCurrentApiConfig, buildEnvForConfig, getClaudeCodePath, normalizeModelName } from "./claude-settings.js";
 import { getEnhancedEnv } from "./util.js";
 
 
@@ -58,6 +58,9 @@ export async function runClaude(options: RunnerOptions): Promise<RunnerHandle> {
       }
       // 如果没有配置，SDK 将使用 Claude Max 订阅（已登录的 Claude Code）
       
+      // Resolve the model name – use config model (normalized) or SDK default
+      const resolvedModel = config?.model ? normalizeModelName(config.model) : undefined;
+
       const q = query({
         prompt,
         options: {
@@ -65,6 +68,7 @@ export async function runClaude(options: RunnerOptions): Promise<RunnerHandle> {
           resume: resumeSessionId,
           abortController,
           env: mergedEnv,
+          ...(resolvedModel ? { model: resolvedModel } : {}),
           pathToClaudeCodeExecutable: getClaudeCodePath(),
           permissionMode: "bypassPermissions",
           includePartialMessages: true,

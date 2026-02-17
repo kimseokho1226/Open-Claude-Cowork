@@ -1,6 +1,6 @@
 import { unstable_v2_prompt } from "@anthropic-ai/claude-agent-sdk";
 import type { SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
-import { getCurrentApiConfig, buildEnvForConfig, getClaudeCodePath} from "./claude-settings.js";
+import { getCurrentApiConfig, buildEnvForConfig, getClaudeCodePath, normalizeModelName } from "./claude-settings.js";
 import { app } from "electron";
 
 // Build enhanced PATH for packaged environment
@@ -30,10 +30,10 @@ export const generateSessionTitle = async (userIntent: string | null) => {
 
   try {
     const result: SDKResultMessage = await unstable_v2_prompt(
-      `please analynis the following user input to generate a short but clearly title to identify this conversation theme:
+      `please analyze the following user input to generate a short but clear title to identify this conversation theme:
       ${userIntent}
       directly output the title, do not include any other content`, {
-      model: getCurrentApiConfig()?.model || "claude-sonnet",
+      model: normalizeModelName(getCurrentApiConfig()?.model || "claude-sonnet-4-5-20250929"),
       env: currentEnv,
       pathToClaudeCodeExecutable: claudeCodePath,
     });

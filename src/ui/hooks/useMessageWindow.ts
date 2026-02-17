@@ -49,7 +49,7 @@ function calculateVisibleStartIndex(
 
 export function useMessageWindow(
     messages: StreamMessage[],
-    permissionRequests: PermissionRequest[],
+    _permissionRequests: PermissionRequest[],
     sessionId: string | null
 ): MessageWindowState {
     const [visibleUserInputCount, setVisibleUserInputCount] = useState(VISIBLE_WINDOW_SIZE);
@@ -83,7 +83,7 @@ export function useMessageWindow(
             }));
 
         return { visibleMessages: visible, visibleStartIndex: startIndex };
-    }, [messages, visibleUserInputCount, permissionRequests.length]);
+    }, [messages, visibleUserInputCount]);
 
     const hasMoreHistory = visibleStartIndex > 0;
 
